@@ -1,0 +1,82 @@
+/* WSOLAddress: 'So11111111111111111111111111111111111111112' */
+/* FeeWallet: 'ZG98FUCjb8mJ824Gbs6RsgVmr1FhXb2oNiJHa2dwmPd' */
+/* FirstTradeTimestamp: TIMESTAMP '2023-08-17' */
+WITH
+  botTradesWithFees AS (
+    SELECT
+      tx_id,
+      user,
+      amount_usd,
+      fee_usd,
+      block_time,
+      date_trunc('day', block_time) AS block_date
+    FROM
+      /* BonkBot Trades */
+      query_3210935
+    WHERE
+      isLastTradeInTransaction = true -- This prevents over counting for multi-hop trades and excludes tax distributions 
+  ),
+  aggregatedBotStats AS (
+    SELECT
+      COUNT(DISTINCT (tx_id)) AS totalNumberOfTransactions,
+      COUNT(DISTINCT (user)) AS totalNumberOfUsers,
+      SUM(amount_usd) AS totalVolumeUSD,
+      SUM(fee_usd) AS totalFeesUSD
+    FROM
+      botTradesWithFees
+  ),
+  dailyAverageBotStats7dMA AS (
+    SELECT
+      FLOOR(AVG(numberOfTransactions)) AS averageDailyNumberOfTransactions7dMA,
+      FLOOR(AVG(numberOfUsers)) AS averageDailyNumberOfUsers7dMA,
+      AVG(volumeUSD) AS averageDailyVolumeUSD7dMA,
+      AVG(feesUSD) AS averageDailyFeesUSD7dMA
+    FROM
+      (
+        SELECT
+          COUNT(DISTINCT (tx_id)) AS numberOfTransactions,
+          COUNT(DISTINCT (user)) AS numberOfUsers,
+          SUM(amount_usd) AS volumeUSD,
+          SUM(fee_usd) AS feesUSD
+        FROM
+          botTradesWithFees
+        WHERE
+          block_date >= date_trunc('day', NOW() - INTERVAL '7' day)
+          AND block_date < date_trunc('day', NOW())
+        GROUP BY
+          block_date
+      )
+  ),
+  botRevenue7d AS (
+    SELECT
+      SUM(fee_usd) AS botFees7dUSD
+    FROM
+      botTradesWithFees
+    WHERE
+      block_time >= NOW() - INTERVAL '7' day
+  ),
+  projectStats AS (
+    SELECT
+      totalNumberOfTransactions,
+      totalNumberOfUsers,
+      totalVolumeUSD,
+      totalFeesUSD,
+      averageDailyNumberOfTransactions7dMA,
+      averageDailyNumberOfUsers7dMA,
+      averageDailyVolumeUSD7dMA,
+      averageDailyFeesUSD7dMA,
+      botFees7dUSD,
+      totalNumberOfTransactions / totalNumberOfUsers AS averageTradesPerUser,
+      totalVolumeUSD / totalNumberOfUsers AS averageVolumePerUserUSD,
+      totalFeesUSD / totalNumberOfUsers AS averageFeesPerUserUSD,
+      /* Combined Revenue */
+      totalFeesUSD AS lifetimeCombinedRevenueUSD
+    FROM
+      aggregatedBotStats,
+      dailyAverageBotStats7dMA,
+      botRevenue7d
+  )
+SELECT
+  *
+FROM
+  projectStats
